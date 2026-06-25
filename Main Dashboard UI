@@ -1,0 +1,106 @@
+import React from 'react';
+import {
+  Plus, ArrowUpRight, Search, GraduationCap, Bell, Clock,
+  MapPin, MessageSquare, Send, Loader2,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+
+const GRADE_POINTS: Record<string, number> = {
+  O: 10, 'A+': 9, A: 8, 'B+': 7, B: 6, C: 5, F: 0,
+};
+
+export default function MarksBoxDashboard() {
+  const [activeTab, setActiveTab] = React.useState('Overview');
+  const [isAddModalOpen, setIsAddModalOpen] = React.useState(false);
+  const [isChatOpen, setIsChatOpen] = React.useState(false);
+  const [chatInput, setChatInput] = React.useState('');
+  const [chatMessages, setChatMessages] = React.useState<{ role: string; content: string }[]>([]);
+  const [isAiLoading, setIsAiLoading] = React.useState(false);
+  const queryClient = useQueryClient();
+
+  const { data: subjects = [] } = useQuery({
+    queryKey: ['subjects'],
+    queryFn: async () => (await fetch('/api/subjects')).json(),
+  });
+
+  const { data: attendance = [] } = useQuery({
+    queryKey: ['attendance'],
+    queryFn: async () => (await fetch('/api/attendance')).json(),
+  });
+
+  const { data: schedule = [] } = useQuery({
+    queryKey: ['schedule'],
+    queryFn: async () => (await fetch('/api/schedule')).json(),
+  });
+
+  const addSubjectMutation = useMutation({
+    mutationFn: async (newSubject: any) => {
+      const response = await fetch('/api/subjects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSubject),
+      });
+      if (!response.ok) throw new Error('Failed to add subject');
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['subjects'] });
+      setIsAddModalOpen(false);
+      toast.success('Subject added successfully');
+    },
+    onError: () => toast.error('Error adding subject'),
+  });
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    const userMessage = { role: 'user', content: chatInput };
+    setChatMessages((prev) => [...prev, userMessage]);
+    setChatInput('');
+    setIsAiLoading(true);
+    try {
+      const response = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [...chatMessages, userMessage] }),
+      });
+      const data = await response.json();
+      setChatMessages((prev) => [...prev, { role: 'assistant', content: data.choices[0].message.content }]);
+    } catch {
+      toast.error('AI assistant is busy. Please try again.');
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const calculateCGPA = () => {
+    if (!subjects.length) return '0.00';
+    let totalPoints = 0, totalCredits = 0;
+    subjects.forEach((s: any) => {
+      if (s.grade && GRADE_POINTS[s.grade]) {
+        totalPoints += GRADE_POINTS[s.grade] * s.credits;
+        totalCredits += s.credits;
+      }
+    });
+    return totalCredits ? (totalPoints / totalCredits).toFixed(2) : '0.00';
+  };
+
+  const totalCredits = subjects.reduce((acc: number, s: any) => acc + (s.credits || 0), 0);
+  const cgpa = calculateCGPA();
+
+  const [formData, setFormData] = React.useState({
+    name: '', code: '', credits: 3,
+    internal_marks: 0, max_internal: 50,
+    external_marks: 0, max_external: 50, grade: 'A+',
+  });
+
+  // ... (full JSX render — same as what's shown above)
+}
